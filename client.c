@@ -26,6 +26,7 @@ struct Message {
 int ssock;
 int pipe_fd[2];
 pid_t child_pid;
+struct LoginInfo login;
 
 struct Message message_history[MAX_MESSAGES];
 int message_count = 0;
@@ -53,6 +54,8 @@ void update_chat_screen() {
     clear_screen();
     print_line();
     print_centered("채팅방");
+    print_centered("(종료:/q) (검색:/s)");
+    printf("    your id: %s\n", login.id);
     print_line();
 
     int start = (message_count > MAX_MESSAGES) ? message_count - MAX_MESSAGES : 0;
@@ -61,7 +64,7 @@ void update_chat_screen() {
     }
 
     print_line();
-    printf("메시지를 입력하세요 (종료하려면 'q' 입력): ");
+    printf("메시지를 입력하세요 : ");
     fflush(stdout);
 }
 
@@ -90,10 +93,39 @@ void sigint_handler(int signo) {
     exit(0);
 }
 
+void search_messages() {
+    char keyword[BUFSIZ];
+    printf("검색할 키워드를 입력하세요: ");
+    fgets(keyword, BUFSIZ, stdin);
+    keyword[strcspn(keyword, "\n")] = 0;  // 개행 문자 제거
+
+    clear_screen();
+    print_line();
+    print_centered("검색 결과");
+    print_line();
+
+    int found = 0;
+    for (int i = 0; i < message_count; i++) {
+        if (strstr(message_history[i].content, keyword) != NULL) {
+            printf("[%s]: %s\n", message_history[i].id, message_history[i].content);
+            found++;
+        }
+    }
+
+    if (found == 0) {
+        printf("검색 결과가 없습니다.\n");
+    }
+
+    print_line();
+    printf("아무 키나 눌러 채팅방으로 돌아가기...");
+    getchar();
+    update_chat_screen();
+}
+
 int main(int argc, char **argv) {
     struct sockaddr_in servaddr;
     char mesg[BUFSIZ];
-    struct LoginInfo login;
+    
    
     if (argc < 2) {
         printf("Usage : %s IP_ADDRESS\n", argv[0]);
@@ -184,9 +216,14 @@ int main(int argc, char **argv) {
             fgets(msg.content, BUFSIZ, stdin);
             msg.content[strcspn(msg.content, "\n")] = 0;  // 개행 문자 제거
 
-            if (strncmp(msg.content, "q", 1) == 0) {
+            if (strcmp(msg.content, "/q") == 0) {
                 printf("채팅을 종료합니다.\n");
+                strcpy(msg.content, "q");  // 서버에게 종료 신호 전송
+                send(ssock, &msg, sizeof(msg), 0);  // 종료 메시지 전송
                 break;
+            } else if (strcmp(msg.content, "/s") == 0) {
+                search_messages();
+                continue;
             }
 
             add_message(msg.id, msg.content);

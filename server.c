@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <errno.h>
 
 #define TCP_PORT 5100
 #define MAX_ID_LEN 20
@@ -36,8 +37,30 @@ void broadcast_message(struct Message *msg, int sender_sock) {
     }
 }
 
+void remove_client(int csock) {
+    for (int i = 0; i < client_count; i++) {
+        if (client_sockets[i] == csock) {
+            // 마지막 클라이언트를 현재 위치로 이동
+            client_sockets[i] = client_sockets[client_count - 1];
+            client_pids[i] = client_pids[client_count - 1];
+            client_count--;
+            printf("클라이언트 제거됨. 현재 접속자 수: %d\n", client_count);
+            break;
+        }
+    }
+}
+
 void sigchld_handler(int signo) {
-    while (waitpid(-1, NULL, WNOHANG) > 0);
+    pid_t pid;
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (int i = 0; i < client_count; i++) {
+            if (client_pids[i] == pid) {
+                remove_client(client_sockets[i]);
+                break;
+            }
+        }
+    }
 }
 
 void sigusr1_handler(int signo) {
@@ -133,7 +156,9 @@ int main(int argc, char **argv)
                 struct Message msg;
                 memset(&msg, 0, sizeof(msg));
                 // 클라이언트로부터 메시지 읽기
-                if ((n = recv(csock, &msg, sizeof(msg), 0)) <= 0){
+                n = recv(csock, &msg, sizeof(msg), 0);
+                if (n <= 0) {
+                    if (n < 0 && errno == EINTR) continue;
                     perror("클라이언트로부터 recv() 실패");
                     break;
                 }
@@ -143,8 +168,8 @@ int main(int argc, char **argv)
                 write(pipe_fd[1], &msg, sizeof(msg));
                 kill(getppid(), SIGUSR1);
 
-                if (strncmp(msg.content, "q", 1) == 0) {
-                    printf("클라이언트 종료\n");
+                if (strcmp(msg.content, "q") == 0) {
+                    printf("클라이언트 %s 종료\n", msg.id);
                     break;
                 }
             }

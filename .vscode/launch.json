@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/junsup/veda/chat_program",
+      "program": "/Users/junsup/veda/chat_program/build/Debug/outDebug"
+    }
+  ]
+}

@@ -10,6 +10,8 @@
 #define TCP_PORT 5100
 #define MAX_ID_LEN 20
 #define MAX_PW_LEN 20
+#define MAX_MESSAGES 100
+#define SCREEN_WIDTH 80
 
 struct LoginInfo {
     char id[MAX_ID_LEN];
@@ -24,6 +26,59 @@ struct Message {
 int ssock;
 int pipe_fd[2];
 pid_t child_pid;
+
+struct Message message_history[MAX_MESSAGES];
+int message_count = 0;
+
+void clear_screen() {
+    printf("\033[2J\033[H");
+}
+
+void print_line() {
+    for (int i = 0; i < SCREEN_WIDTH; i++) {
+        printf("-");
+    }
+    printf("\n");
+}
+
+void print_centered(const char* text) {
+    int padding = (SCREEN_WIDTH - strlen(text)) / 2;
+    for (int i = 0; i < padding; i++) {
+        printf(" ");
+    }
+    printf("%s\n", text);
+}
+
+void update_chat_screen() {
+    clear_screen();
+    print_line();
+    print_centered("채팅방");
+    print_line();
+
+    int start = (message_count > MAX_MESSAGES) ? message_count - MAX_MESSAGES : 0;
+    for (int i = start; i < message_count; i++) {
+        printf("[%s]: %s\n", message_history[i].id, message_history[i].content);
+    }
+
+    print_line();
+    printf("메시지를 입력하세요 (종료하려면 'q' 입력): ");
+    fflush(stdout);
+}
+
+void add_message(const char* id, const char* content) {
+    if (message_count < MAX_MESSAGES) {
+        strcpy(message_history[message_count].id, id);
+        strcpy(message_history[message_count].content, content);
+        message_count++;
+    } else {
+        for (int i = 0; i < MAX_MESSAGES - 1; i++) {
+            message_history[i] = message_history[i + 1];
+        }
+        strcpy(message_history[MAX_MESSAGES - 1].id, id);
+        strcpy(message_history[MAX_MESSAGES - 1].content, content);
+    }
+    update_chat_screen();
+}
 
 void sigint_handler(int signo) {
     close(ssock);
@@ -41,7 +96,7 @@ int main(int argc, char **argv) {
     struct LoginInfo login;
    
     if (argc < 2) {
-        printf("Usage : %s IP_ADRESS\n", argv[0]);
+        printf("Usage : %s IP_ADDRESS\n", argv[0]);
         return -1;
     }
 
@@ -60,6 +115,11 @@ int main(int argc, char **argv) {
         perror("connect()");
         return -1;
     }
+
+    clear_screen();
+    print_line();
+    print_centered("로그인");
+    print_line();
 
     printf("아이디를 입력하세요: ");
     fgets(login.id, MAX_ID_LEN, stdin);
@@ -86,8 +146,6 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    printf("로그인 성공! 채팅을 시작합니다.\n");
-
     if (pipe(pipe_fd) < 0) {
         perror("pipe()");
         return -1;
@@ -110,7 +168,7 @@ int main(int argc, char **argv) {
                 perror("recv()");
                 break;
             }
-            printf("\n받은 메시지: %s: %s", received_msg.id, received_msg.content);
+            add_message(received_msg.id, received_msg.content);
             write(pipe_fd[0], "1", 1);  // 부모에게 메시지 수신 알림
         }
         close(pipe_fd[0]);
@@ -118,11 +176,11 @@ int main(int argc, char **argv) {
     } else {
         // 부모 프로세스: 메시지 송신
         close(pipe_fd[0]);  // 읽기 파이프 닫기
+        update_chat_screen();
         while (1) {
             struct Message msg;
             strcpy(msg.id, login.id);
             
-            printf("메시지를 입력하세요 (종료하려면 'q' 입력): ");
             fgets(msg.content, BUFSIZ, stdin);
             msg.content[strcspn(msg.content, "\n")] = 0;  // 개행 문자 제거
 
@@ -131,8 +189,7 @@ int main(int argc, char **argv) {
                 break;
             }
 
-            // 메시지 전송 전 클라이언트에서 출력
-            printf("%s: %s\n", msg.id, msg.content);
+            add_message(msg.id, msg.content);
 
             if (send(ssock, &msg, sizeof(msg), 0) <= 0) {
                 perror("send()");

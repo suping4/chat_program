@@ -6,10 +6,12 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <signal.h>
 
 #define TCP_PORT 5100
 #define MAX_ID_LEN 20
 #define MAX_PW_LEN 20
+#define MAX_CLIENTS 10
 
 struct LoginInfo {
     char id[MAX_ID_LEN];
@@ -21,15 +23,40 @@ struct Message {
     char content[BUFSIZ];
 };
 
+int client_sockets[MAX_CLIENTS];
+int client_count = 0;
+pid_t client_pids[MAX_CLIENTS];
+int pipe_fd[2]; // 파이프 디스크립터 정의
+
+void broadcast_message(struct Message *msg, int sender_sock) {
+    for (int i = 0; i < client_count; i++) {
+        if (client_sockets[i] != sender_sock) {
+            send(client_sockets[i], msg, sizeof(struct Message), 0);
+        }
+    }
+}
+
+void sigchld_handler(int signo) {
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+void sigusr1_handler(int signo) {
+    struct Message msg;
+    read(pipe_fd[0], &msg, sizeof(msg));
+    broadcast_message(&msg, -1);
+}
+
 int main(int argc, char **argv)
 {
     int ssock; /* 소켓 디스크립트 정의 */
-    int pipe_fd[2]; // 파이프 디스크립터 정의
     socklen_t clen;
     pid_t pid;
     int n;  // 데이터 전송 및 수신 변수
     struct sockaddr_in servaddr, cliaddr; /* 주소 구조체 정의 */
     char mesg[BUFSIZ];
+
+    signal(SIGCHLD, sigchld_handler);
+    signal(SIGUSR1, sigusr1_handler);
 
     /* 서버 소켓 생성 */
     if ((ssock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -71,9 +98,11 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* 네트워크 주소를 문자열로 변경 */
-        inet_ntop(AF_INET, &cliaddr.sin_addr, mesg, BUFSIZ);
-        printf("클라이언트 연결됨: %s\n", mesg);
+        if (client_count >= MAX_CLIENTS) {
+            printf("최대 클라이언트 수에 도달했습니다. 연결을 거부합니다.\n");
+            close(csock);
+            continue;
+        }
 
         if ((pid = fork()) < 0) {
             perror("fork()");
@@ -93,7 +122,7 @@ int main(int argc, char **argv)
             strcpy(mesg, "로그인 성공");
 
             // 인증 결과 전송
-            if (send(csock, mesg, strlen(mesg), 0) <= 0) {
+            if (send(csock, mesg, strlen(mesg) + 1, 0) <= 0) {  // +1을 추가하여 null 종료 문자 포함
                 perror("인증 결과 전송 실패");
                 exit(1);
             }
@@ -108,19 +137,11 @@ int main(int argc, char **argv)
                     perror("클라이언트로부터 recv() 실패");
                     break;
                 }
-                printf("클라이언트로부터 받은 메시지: %s: %s", msg.id, msg.content);
+                printf("클라이언트로부터 받은 메시지: %s: %s\n", msg.id, msg.content);
 
-                // 부모 프로세스에게 메시지 전달
-                if (write(pipe_fd[1], &msg, sizeof(msg)) <= 0) {
-                    perror("파이프에 write() 실패");
-                    break;
-                }
-
-                // 클라이언트에게 응답
-                if (send(csock, &msg, sizeof(msg), 0) <= 0) {
-                    perror("클라이언트에게 send() 실패");
-                    break;
-                }
+                // 파이프를 통해 부모 프로세스에게 메시지 전달
+                write(pipe_fd[1], &msg, sizeof(msg));
+                kill(getppid(), SIGUSR1);
 
                 if (strncmp(msg.content, "q", 1) == 0) {
                     printf("클라이언트 종료\n");
@@ -133,11 +154,13 @@ int main(int argc, char **argv)
             exit(0);
         } else {
             // 부모 프로세스
-            close(csock);
+            client_sockets[client_count] = csock;
+            client_pids[client_count] = pid;
+            client_count++;
+            
+            inet_ntop(AF_INET, &cliaddr.sin_addr, mesg, BUFSIZ);
+            printf("클라이언트 연결됨: %s\n", mesg);
         }
-
-        // 좀비 프로세스 처리
-        while (waitpid(-1, NULL, WNOHANG) > 0);
     }
 
     close(pipe_fd[0]);

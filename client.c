@@ -28,11 +28,11 @@ int pipe_fd[2];
 pid_t pid;
 struct LoginInfo login;
 
-struct Message message_history[MAX_MESSAGES];  // 채팅방을 만들기 위한 히스토리를 저장할 배열
+struct Message message_history[MAX_MESSAGES];  // 채팅방을 만들기 위한 메세지 내역을 저장할 배열
 int message_count = 0;  // 채팅 히스토리의 개수를 저장할 변수
 
 void clear_screen() {
-    printf("\033[2J\033[H");    //ANSI 이스케이프 코드를 사용하여 화면을 지우는 함수
+    printf("\033[2J\033[H");    //ANSI 이스케이프 코드를 사용
 }
 
 void print_line() {
@@ -42,14 +42,16 @@ void print_line() {
     printf("\n");
 }
 
+// 텍스트를 가운데 정렬하는 함수
 void print_centered(const char* text) {
     int padding = (SCREEN_WIDTH - strlen(text)) / 2;  // 텍스트를 가운데 정렬하기 위한 공백 계산
     for (int i = 0; i < padding; i++) { 
-        printf(" "); 
+        printf(" ");
     }
     printf("%s\n", text);  // 텍스트를 가운데 정렬하여 출력
 }
 
+// 채팅방 화면을 업데이트하는 함수
 void update_chat_screen() {
     clear_screen();  // 화면을 지우는 함수 호출
     print_line();
@@ -67,9 +69,10 @@ void update_chat_screen() {
     printf("메시지를 입력하세요 : ");
     fflush(stdout);  // 출력 버퍼를 비우는 함수 호출
 }
+
 // 메시지를 채팅 히스토리에 추가하는 함수
 void add_message(const char* id, const char* content) { 
-    if (message_count < MAX_MESSAGES) {  // 채팅 히스토리의 개수가 최대 개수보다 작을 때
+    if (message_count < MAX_MESSAGES) {  // 채팅 히스토리의 개수가 최대 메시지 개수보다 작을 때
         strcpy(message_history[message_count].id, id);  // 메시지 ID를 복사
         strcpy(message_history[message_count].content, content);  // 메시지 내용을 복사
         message_count++;  // 메시지 개수 증가
@@ -83,17 +86,19 @@ void add_message(const char* id, const char* content) {
     update_chat_screen();  // 채팅 화면 업데이트
 }
 
-void sigint_handler(int signo) {    // SIGINT 시그널 핸들러 함수 정의
-    close(ssock);                   // 서버 소켓 연결 종료
-    close(pipe_fd[0]);              // 파이프 읽기 종단 닫기
-    close(pipe_fd[1]);              // 파이프 쓰기 종단 닫기
-    if (pid > 0) {                  // 자식 프로세스가 존재하는 경우
-        kill(pid, SIGTERM);         // 자식 프로세스에 종료 시그널 보내기
+// SIGINT 시그널 핸들러 함수 정의
+void sigint_handler(int signo) {  
+    close(ssock);   // 서버 소켓 연결 종료
+    close(pipe_fd[0]);  // 파이프 읽기 종단 닫기
+    close(pipe_fd[1]);  // 파이프 쓰기 종단 닫기
+    if (pid > 0) {  // 자식 프로세스가 존재하는 경우
+        kill(pid, SIGTERM);  // 자식 프로세스에 종료 시그널 보내기
     }
     exit(0);
 }
 
-void search_messages() {    // 메시지를 검색하는 함수
+// 메시지를 검색하는 함수
+void search_messages() {   
     char keyword[BUFSIZ];   // 검색할 키워드를 저장할 문자열 배열 선언
     printf("검색할 키워드를 입력하세요: ");
     fgets(keyword, BUFSIZ, stdin);
@@ -132,7 +137,7 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    if ((ssock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {  // 소켓 생성
+    if ((ssock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {  // 서버 소켓 생성
         perror("socket()");
         return -1;
     }
@@ -153,7 +158,7 @@ int main(int argc, char **argv) {
     print_centered("로그인");
     print_line();
 
-    printf("아이디를 입력하세요: ");
+    printf("채팅에서 사용할 아이디를 입력하세요: ");
     fgets(login.id, MAX_ID_LEN, stdin);
     login.id[strcspn(login.id, "\n")] = 0;
 
@@ -172,7 +177,7 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    if (strcmp(mesg, "로그인 성공") != 0) {  // 로그인 성공이 반환이 안되면 실패 출력
+    if (strcmp(mesg, "로그인 성공") != 0) {  // 수신한 mesg가 로그인 성공이 아니면 실패 출력
         printf("로그인 실패: %s\n", mesg);
         close(ssock);
         return -1;
@@ -233,9 +238,8 @@ int main(int argc, char **argv) {
                 break;
             }
 
-            // 자식 프로세스의 메시지 수신 대기
             char buf[2];
-            read(pipe_fd[1], buf, 1);  // 자식 프로세스의 메시지 수신 대기
+            read(pipe_fd[0], buf, 1);
         }
         close(pipe_fd[1]);
     }

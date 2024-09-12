@@ -40,6 +40,7 @@ void broadcast_message(struct Message *msg, int sender_sock) {
     }
 }
 
+// 클라이언트 제거 함수
 void remove_client(int csock) {
     for (int i = 0; i < client_count; i++) {    // 모든 클라이언트에 대해 반복
         if (client_sockets[i] == csock) {    // 제거할 클라이언트 소켓을 찾았을 때
@@ -53,7 +54,7 @@ void remove_client(int csock) {
 }
 
 // 자식 프로세스 종료를 처리하는 시그널 핸들러
-void sigchld_handler(int signo) {
+void sigchld_handler(int signo) {   
     pid_t pid;
     int status;  // 자식 프로세스 상태 변수
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {    // 자식 프로세스가 종료되었을 때
@@ -66,7 +67,8 @@ void sigchld_handler(int signo) {
     }
 }
 
-void sigusr1_handler(int signo) { // 자식 프로세스가 메시지를 보내면 부모 프로세스에게 알리는 시그널 핸들러
+// 자식 프로세스가 메시지를 보내면 부모 프로세스에게 알리는 시그널 핸들러
+void sigusr1_handler(int signo) { 
     struct Message msg;
     read(pipe_fd[0], &msg, sizeof(msg));    // 파이프에서 메시지 읽기
     broadcast_message(&msg, -1);    // 모든 클라이언트에게 메시지 브로드캐스트
@@ -162,6 +164,7 @@ int main(int argc, char **argv)
     // printf 대신 syslog 사용
     syslog(LOG_NOTICE, "서버가 시작되었습니다. 포트 %d", TCP_PORT);
 
+    // 무한 루프를 사용하여 클라이언트 연결 처리
     while (1) {
         clen = sizeof(cliaddr);  // 클라이언트 주소 길이 초기화
         int csock = accept(ssock, (struct sockaddr *)&cliaddr, &clen);  // 클라이언트 연결 accept
@@ -176,6 +179,7 @@ int main(int argc, char **argv)
             continue;
         }
 
+        // 자식 프로세스 생성
         if ((pid = fork()) < 0) {
             perror("fork()");
         } else if (pid == 0) {    // 자식 프로세스
@@ -201,6 +205,7 @@ int main(int argc, char **argv)
             // printf 대신 syslog 사용
             syslog(LOG_NOTICE, "사용자 '%s' 로그인 성공", login.id);
 
+            // 클라이언트로부터 메시지를 받아 모든 클라이언트에게 브로드캐스트하는 루프
             while (1) {
                 struct Message msg;
                 memset(&msg, 0, sizeof(msg));
@@ -218,12 +223,13 @@ int main(int argc, char **argv)
                 write(pipe_fd[1], &msg, sizeof(msg));  // 파이프에 메시지 쓰기
                 kill(getppid(), SIGUSR1);  // getppid()를 사용하여 부모 프로세스에게 시그널 전달
 
+                // 클라이언트가 '/q'를 보내면 종료 (클라이언트가 종료되면 클라이언트 소켓이 닫히고, 클라이언트 프로세스 ID가 -1로 설정됨)
                 if (strcmp(msg.content, "q") == 0) {
                     // printf 대신 syslog 사용
                     syslog(LOG_NOTICE, "클라이언트 %s 종료", msg.id);
                     break;
                 }
-            } 
+            }
 
             close(pipe_fd[1]);
             close(csock);

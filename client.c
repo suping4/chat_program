@@ -13,21 +13,30 @@
 #define MAX_MESSAGES 100
 #define SCREEN_WIDTH 80
 
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
+#define ANSI_BOLD          "\x1b[1m"
+
+// 로그인 정보를 저장하는 구조체
 struct LoginInfo {
     char id[MAX_ID_LEN];
     char password[MAX_PW_LEN];
 };
 
+// 메시지 정보를 저장하는 구조체
 struct Message {
-    char id[MAX_ID_LEN];
-    char content[BUFSIZ];
+    char id[MAX_ID_LEN];    // 메시지를 보낸 클라이언트의 아이디
+    char content[BUFSIZ];   // 메시지 내용
 };
 
+// 전역 변수
 int ssock;
 int pipe_fd[2];
-pid_t pid;
+pid_t child_pid;
 struct LoginInfo login;
-
 struct Message message_history[MAX_MESSAGES];  // 채팅방을 만들기 위한 메세지 내역을 저장할 배열
 int message_count = 0;  // 채팅 히스토리의 개수를 저장할 변수
 
@@ -36,19 +45,21 @@ void clear_screen() {
 }
 
 void print_line() {
+    printf(ANSI_BOLD ANSI_COLOR_BLUE);
     for (int i = 0; i < SCREEN_WIDTH; i++) {
         printf("-");
     }
-    printf("\n");
+    printf(ANSI_COLOR_RESET "\n");
 }
 
 // 텍스트를 가운데 정렬하는 함수
 void print_centered(const char* text) {
     int padding = (SCREEN_WIDTH - strlen(text)) / 2;  // 텍스트를 가운데 정렬하기 위한 공백 계산
+    printf(ANSI_BOLD ANSI_COLOR_GREEN);
     for (int i = 0; i < padding; i++) { 
         printf(" ");
     }
-    printf("%s\n", text);  // 텍스트를 가운데 정렬하여 출력
+    printf("%s" ANSI_COLOR_RESET "\n", text);  // 텍스트를 가운데 정렬하여 출력
 }
 
 // 채팅방 화면을 업데이트하는 함수
@@ -57,7 +68,7 @@ void update_chat_screen() {
     print_line();
     print_centered("채팅방");
     print_centered("(종료:/q) (검색:/s)");
-    printf("   your id: %s\n", login.id);
+    printf(ANSI_BOLD ANSI_COLOR_YELLOW "   your id: %s\n" ANSI_COLOR_RESET, login.id);
     print_line();
 
     int start = (message_count > MAX_MESSAGES) ? message_count - MAX_MESSAGES : 0;  // 채팅 히스토리 출력을 위한 시작 인덱스 계산
@@ -66,7 +77,7 @@ void update_chat_screen() {
     }
 
     print_line();
-    printf("메시지를 입력하세요 : ");
+    printf(ANSI_BOLD ANSI_COLOR_GREEN "메시지를 입력하세요 : " ANSI_COLOR_RESET);
     fflush(stdout);  // 출력 버퍼를 비우는 함수 호출
 }
 
@@ -91,8 +102,8 @@ void sigint_handler(int signo) {
     close(ssock);   // 서버 소켓 연결 종료
     close(pipe_fd[0]);  // 파이프 읽기 종단 닫기
     close(pipe_fd[1]);  // 파이프 쓰기 종단 닫기
-    if (pid > 0) {  // 자식 프로세스가 존재하는 경우
-        kill(pid, SIGTERM);  // 자식 프로세스에 종료 시그널 보내기
+    if (child_pid > 0) {  // 자식 프로세스가 존재하는 경우
+        kill(child_pid, SIGTERM);  // 자식 프로세스에 종료 시그널 보내기
     }
     exit(0);
 }
@@ -100,7 +111,7 @@ void sigint_handler(int signo) {
 // 메시지를 검색하는 함수
 void search_messages() {   
     char keyword[BUFSIZ];   // 검색할 키워드를 저장할 문자열 배열 선언
-    printf("검색할 키워드를 입력하세요: ");
+    printf(ANSI_BOLD ANSI_COLOR_GREEN "검색할 키워드를 입력하세요: " ANSI_COLOR_RESET);
     fgets(keyword, BUFSIZ, stdin);
     keyword[strcspn(keyword, "\n")] = 0;  // 개행 문자 제거
 
@@ -122,7 +133,7 @@ void search_messages() {
     }
 
     print_line();
-    printf("아무 키나 눌러 채팅방으로 돌아가기...");
+    printf(ANSI_BOLD ANSI_COLOR_YELLOW "아무 키나 눌러 채팅방으로 돌아가기..." ANSI_COLOR_RESET);
     getchar();
     update_chat_screen();
 }
@@ -188,14 +199,17 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    signal(SIGINT, sigint_handler);  // SIGINT 시그널 핸들러 등록
+    if(signal(SIGINT, sigint_handler) == SIG_ERR) {  // SIGINT 시그널 핸들러 등록
+        perror("signal: (SIGINT)");
+        return -1;
+    }
 
-    pid = fork();
+    child_pid = fork();
 
-    if (pid < 0) {
+    if (child_pid < 0) {
         perror("fork()");
         return -1;
-    } else if (pid == 0) {
+    } else if (child_pid == 0) {
         // 자식 프로세스: 메시지 수신
         close(pipe_fd[1]);  // 쓰기 파이프 닫기
         while (1) {
@@ -245,7 +259,7 @@ int main(int argc, char **argv) {
     }
 
     close(ssock);
-    kill(pid, SIGTERM);
+    kill(child_pid, SIGTERM);
     wait(NULL);
     return 0;
 }

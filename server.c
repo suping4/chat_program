@@ -31,8 +31,8 @@ int client_count = 0;  // 현재 접속한 클라이언트 수
 pid_t client_pids[MAX_CLIENTS];  // 클라이언트 프로세스 ID 배열
 int pipe_fd[2]; // 파이프 디스크립터 정의
 
-// 메시지를 모든 클라이언트에게 브로드캐스트하는 함수
-void broadcast_message(struct Message *msg, int sender_sock) {
+// 메시지를 모든 클라이언트에게 전송하는 함수 (인자로 받은 소켓을 제외하고 모든 클라이언트에게 메시지 전송)
+void sendtoall_message(struct Message *msg, int sender_sock) {
     for (int i = 0; i < client_count; i++) {    // 모든 클라이언트에 대해 반복
         if (client_sockets[i] != sender_sock) {     // 발신자를 제외한 모든 클라이언트에게 메시지 전송
             send(client_sockets[i], msg, sizeof(struct Message), 0);   // 클라이언트 소켓으로 메시지 전송
@@ -71,13 +71,13 @@ void sigchld_handler(int signo) {
 void sigusr1_handler(int signo) { 
     struct Message msg;
     read(pipe_fd[0], &msg, sizeof(msg));    // 파이프에서 메시지 읽기
-    broadcast_message(&msg, -1);    // 모든 클라이언트에게 메시지 브로드캐스트
+    sendtoall_message(&msg, -1);    // 모든 클라이언트에게 메시지 전송
 }
 
+// 서버 데몬화
 void daemonize() {
     pid_t pid, sid;
 
-    // 부모 프로세스 종료
     pid = fork();
     if (pid < 0) {
         exit(EXIT_FAILURE);
@@ -117,7 +117,7 @@ void daemonize() {
 
 int main(int argc, char **argv)
 {
-    // 데몬화 과정 추가
+    // 서버 데몬화
     daemonize();
 
     // syslog를 사용하여 로그 남기기
@@ -130,24 +130,35 @@ int main(int argc, char **argv)
     struct sockaddr_in servaddr, cliaddr; // 서버 및 클라이언트 주소 구조체
     char mesg[BUFSIZ];
 
-    signal(SIGCHLD, sigchld_handler);   // 자식 프로세스 종료 시그널 핸들러
-    signal(SIGUSR1, sigusr1_handler);   // 자식 프로세스가 메시지를 보내면 부모 프로세스에게 알리는 시그널 핸들러
+    // 자식 프로세스 종료 시그널 핸들러
+    if(signal(SIGCHLD, sigchld_handler) == SIG_ERR) {
+        perror("signal: (SIGCHLD)");
+        return -1;
+    }
 
-    if ((ssock = socket(AF_INET, SOCK_STREAM, 0)) < 0){    // 서버 소켓 생성
+    // 자식 프로세스가 메시지를 보내면 부모 프로세스에게 알리는 시그널 핸들러
+    if(signal(SIGUSR1, sigusr1_handler) == SIG_ERR) {
+        perror("signal: (SIGUSR1)");
+        return -1;
+    }
+
+    // 서버 소켓 생성
+    if ((ssock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror("socket()");
         return -1;
     }
 
-    if (pipe(pipe_fd) < 0) {    // 파이프 생성
+    // 파이프 생성
+    if (pipe(pipe_fd) < 0) {
         perror("pipe()");
         return -1;
     }
 
     // 주소 구조체에 주소 지정
     memset(&servaddr, 0, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;  // 주소 체계 설정
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);  // 서버 IP 주소 설정
-    servaddr.sin_port = htons(TCP_PORT); // 서버 포트 설정
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(TCP_PORT);
 
     // bind 함수를 사용하여 서버 소켓의 주소 설정
     if (bind(ssock, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0){
@@ -155,8 +166,8 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    // 동시에 접속하는 클라이언트의 처리를 위한 대기 큐를 설정(최대 8개 접속)
-    if (listen(ssock, 8) < 0){
+    // 동시에 접속하는 클라이언트의 처리를 위한 대기 큐를 설정(최대 10개 접속)
+    if (listen(ssock, MAX_CLIENTS) < 0){
         perror("listen()");
         return -1;
     }
@@ -240,7 +251,8 @@ int main(int argc, char **argv)
             client_pids[client_count] = pid;  // 클라이언트 프로세스 ID를 배열에 저장
             client_count++;  // 클라이언트 수 증가
             
-            inet_ntop(AF_INET, &cliaddr.sin_addr, mesg, BUFSIZ);  // 클라이언트 IP 주소를 문자열로 변환
+            // 새로운 클라이언트를 받으면 클라이언트의 IP 주소를 문자열로 변환
+            inet_ntop(AF_INET, &cliaddr.sin_addr, mesg, BUFSIZ);
             // printf 대신 syslog 사용
             syslog(LOG_NOTICE, "클라이언트 연결됨: %s", mesg);  // 연결된 클라이언트의 IP 주소 출력
         }
